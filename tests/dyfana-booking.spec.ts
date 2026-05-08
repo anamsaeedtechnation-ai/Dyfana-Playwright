@@ -56,7 +56,7 @@ test('Transport booking', async ({ page }) => {
   await page.getByRole('button', { name: 'OK' }).click();
 
   await page.locator('#dynamic_form_nest_item_ride_0_transport_type').click();
-  await page.getByText('Large Size').click();
+  await page.getByText('Small Size').click();
   await page.getByRole('button', { name: 'Next Step' }).click();
 
   await page.getByRole('textbox', { name: '* First Name' }).fill('anam');
