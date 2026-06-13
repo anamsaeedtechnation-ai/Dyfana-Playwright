@@ -1,5 +1,20 @@
 import { test, expect, Page } from '@playwright/test';
 
+const blockChatWidgets = async (page: Page) => {
+  await page.route(/hubspot|hs-scripts|hs-banner|hbspt|chatflow/i, (route) => route.abort());
+};
+
+const dismissChatWidgets = async (page: Page) => {
+  await page.evaluate(() => {
+    document.querySelectorAll('iframe').forEach((f) => {
+      const src = f.src || f.name || '';
+      if (/chat|hubspot|widget/i.test(src) || f.title === '') {
+        f.remove();
+      }
+    });
+  });
+};
+
 const fillStripe = async (page: Page) => {
   const stripe = page.frameLocator('iframe[title*="Secure card payment"]');
   await stripe.getByRole('textbox', { name: 'Credit or debit card number' }).fill('4242 4242 4242 4242');
@@ -8,9 +23,6 @@ const fillStripe = async (page: Page) => {
   await stripe.getByRole('textbox', { name: /ZIP|Postcode/ }).fill('36125');
 };
 
-// Stripe Elements validate async, AND the chat widget at bottom-right intercepts
-// clicks at the bottom of the page. Wait briefly, then scroll Pay Now to the top
-// of the viewport so the click lands far from the chat.
 const clickPayNow = async (page: Page) => {
   await page.waitForTimeout(2000);
   const payBtn = page.getByRole('button', { name: 'Pay Now' });
@@ -19,7 +31,15 @@ const clickPayNow = async (page: Page) => {
   await payBtn.click();
 };
 
+const reloadIfBlank = async (page: Page, marker: string) => {
+  const field = page.getByRole('textbox', { name: marker });
+  if (!(await field.isVisible({ timeout: 10000 }).catch(() => false))) {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+  }
+};
+
 test.beforeEach(async ({ page }) => {
+  await blockChatWidgets(page);
   await page.goto('https://dev.dyfana.com/', { waitUntil: 'domcontentloaded' });
 });
 
@@ -33,6 +53,7 @@ test('Umrah booking', async ({ page }) => {
   await page.locator('input[name="phone"]').fill('43535345');
   await page.getByRole('button', { name: 'Book Now' }).click();
 
+  await reloadIfBlank(page, '* First Name');
   await page.getByRole('textbox', { name: '* First Name' }).fill('anam');
   await page.getByRole('textbox', { name: '* Last Name' }).fill('saeed');
   await page.getByRole('textbox', { name: '* Email Address' }).fill('anam@gmail.com');
@@ -59,6 +80,7 @@ test('Transport booking', async ({ page }) => {
   await page.getByText('Small Size').click();
   await page.getByRole('button', { name: 'Next Step' }).click();
 
+  await reloadIfBlank(page, '* First Name');
   await page.getByRole('textbox', { name: '* First Name' }).fill('anam');
   await page.getByRole('textbox', { name: '* Last Name' }).fill('test');
   await page.getByRole('textbox', { name: '* Email Address' }).fill('anam@gmail.com');
@@ -90,6 +112,7 @@ test('Guide booking', async ({ page }) => {
   await page.getByRole('spinbutton', { name: '* Number of People' }).fill('2');
   await page.locator('.ant-form-item-control-input-content > .ant-row > .ant-col > .ant-space > .ant-space-item > .ant-btn').click();
 
+  await reloadIfBlank(page, '* First Name');
   await page.getByRole('textbox', { name: '* First Name' }).fill('anam');
   await page.getByRole('textbox', { name: '* Last Name' }).fill('saeed');
   await page.getByRole('textbox', { name: '* Email Address' }).fill('anam@gmail.com');
@@ -110,7 +133,7 @@ test('Explore Saudi booking', async ({ page }) => {
   await page.getByRole('textbox', { name: 'Phone Number *' }).fill('72532757');
   await page.getByRole('button', { name: /Book Now/ }).click();
 
-  // Payment form (different page)
+  await reloadIfBlank(page, '* First Name');
   await page.getByRole('textbox', { name: '* First Name' }).fill('anam');
   await page.getByRole('textbox', { name: '* Last Name' }).fill('test');
   await page.getByRole('textbox', { name: '* Email Address' }).fill('anam@gmail.com');
@@ -124,32 +147,36 @@ test('Explore Saudi booking', async ({ page }) => {
 });
 
 test('Hotel booking', async ({ page }) => {
-  // 2-day buffer so the check-in is never in the past (timezone-safe via local date parts)
   const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const checkIn = fmt(new Date(Date.now() + 86400000 * 2));
   const checkOut = fmt(new Date(Date.now() + 86400000 * 3));
   const filterUrl = `https://dev.dyfana.com/filter?checkInOut=${checkIn}_${checkOut}&travelers=2&city=Makkah&adults=2&rooms=1&lat=21.3891&lng=39.8579&place=Makkah%20Saudi%20Arabia&placeId=ChIJjRUoRRyZwxURcFyTsR6oPZQ&name=Makkah&breadcrumb=Makkah%2C%20Saudi%20Arabia`;
   await page.goto(filterUrl, { waitUntil: 'domcontentloaded' });
 
-  await page.getByRole('button', { name: 'View Details' }).first().click({ timeout: 60000 });
+
+  const viewDetailsBtn = page.getByRole('button', { name: 'View Details' }).first();
+  if (!(await viewDetailsBtn.isVisible({ timeout: 30000 }).catch(() => false))) {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+  
+  }
+  await viewDetailsBtn.click({ timeout: 60000 });
+
   await page.getByRole('button', { name: '+' }).first().click();
   await page.getByRole('button', { name: 'Book Now' }).click();
 
-  // Hotel form uses "Name *" style (not "* Name")
+  await reloadIfBlank(page, 'First Name *');
   await page.getByRole('textbox', { name: 'First Name *' }).fill('anam');
   await page.getByRole('textbox', { name: 'Last Name *' }).fill('saeed');
   await page.getByRole('textbox', { name: 'Email Address *' }).fill('anam@gmail.com');
   await page.getByRole('textbox', { name: 'Enter Phone Number' }).fill('234234234');
   await page.getByRole('textbox', { name: "Cardholder's Name" }).fill('anam');
 
-  // The "Please Select" datetime field — easy to miss, blocks Pay Now silently
   await page.getByRole('textbox', { name: 'Please Select' }).click();
   await page.getByText('06').first().click();
   await page.getByText('Now', { exact: true }).click();
 
   await fillStripe(page);
   await page.getByRole('checkbox', { name: /By completing this booking/ }).check();
-  // Hotel has a second mandatory checkbox — Pay Now stays disabled without it
   await page.getByRole('checkbox', { name: /complimentary airport transfer/i }).check();
   await clickPayNow(page);
 
@@ -157,29 +184,22 @@ test('Hotel booking', async ({ page }) => {
 });
 
 test('Offers booking', async ({ page }) => {
-  // Navigate to the offer hotel page with valid future dates
   const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const checkIn = fmt(new Date(Date.now() + 86400000 * 2));
   const checkOut = fmt(new Date(Date.now() + 86400000 * 3));
   await page.goto(`https://dev.dyfana.com/hotel/186?checkInOut=${checkIn}_${checkOut}&adults=2&children=0&rooms=1`, { waitUntil: 'domcontentloaded' });
 
-  // Dismiss sign-in alert if present
+
   const alert = page.locator('.ant-alert');
   if (await alert.isVisible({ timeout: 5000 }).catch(() => false)) {
     await alert.evaluate((el) => el.remove());
   }
 
-  // Select a room and book
   await page.getByRole('button', { name: '+' }).first().click({ timeout: 30000 });
   await page.getByRole('button', { name: 'Book Now' }).click();
 
-  // Reload if checkout page is blank
-  const firstNameField = page.getByRole('textbox', { name: 'First Name *' });
-  if (!(await firstNameField.isVisible({ timeout: 10000 }).catch(() => false))) {
-    await page.reload({ waitUntil: 'domcontentloaded' });
-  }
-
-  await firstNameField.fill('anam');
+  await reloadIfBlank(page, 'First Name *');
+  await page.getByRole('textbox', { name: 'First Name *' }).fill('anam');
   await page.getByRole('textbox', { name: 'Last Name *' }).fill('test');
   await page.getByRole('textbox', { name: 'Email Address *' }).fill('anam@gmail.com');
   await page.getByRole('textbox', { name: 'Enter Phone Number' }).fill('27653612536');
@@ -202,6 +222,7 @@ test('Umrah Badal booking', async ({ page }) => {
   await page.getByRole('textbox', { name: 'Umrah Being Performed on the' }).fill('test');
   await page.getByRole('button', { name: 'Book Now - USD' }).click();
 
+  await reloadIfBlank(page, '* First Name');
   await page.getByRole('textbox', { name: '* First Name' }).fill('anam');
   await page.getByRole('textbox', { name: '* Last Name' }).fill('test');
   await page.getByRole('textbox', { name: '* Email Address' }).fill('anam@gmail.com');
