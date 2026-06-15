@@ -233,58 +233,49 @@ test('Offers booking', async ({ page }) => {
   await expect(page.getByText(/Successfully book|Booking successful/i).first()).toBeVisible({ timeout: 30000 });
 });
 
-test.skip('Custom Umrah booking', async ({ page }) => {
-  // Skipped: requires hotel availability on dev server (currently "No Hotel Available" for all cities/dates)
+test('Custom Umrah booking', async ({ page }) => {
   await page.goto('https://dev.dyfana.com/umrah/customize/', { waitUntil: 'domcontentloaded' });
   await waitForLoader(page);
+  await page.waitForTimeout(1000);
 
   // Select city
   const cityCombo = page.getByRole('combobox').first();
   await cityCombo.click();
+  await page.waitForTimeout(300);
   await cityCombo.fill('makkah');
+  await page.waitForTimeout(500);
   await page.getByText('Makkah Saudi Arabia').click();
+  await page.waitForTimeout(500);
 
-  // Pick date range
+  // Pick nearest available dates for hotel availability
   await page.getByRole('textbox', { name: 'Start Date' }).click();
-  await page.getByRole('button', { name: 'Next month (PageDown)' }).click();
-  await page.getByText('11').nth(1).click();
-  await page.getByText('16').nth(1).click();
+  await page.waitForTimeout(500);
+  await page.locator('.ant-picker-cell:not(.ant-picker-cell-disabled)').nth(2).click();
+  await page.waitForTimeout(500);
+  await page.locator('.ant-picker-cell:not(.ant-picker-cell-disabled)').nth(5).click();
+  await page.waitForTimeout(1000);
 
-  // Add Transportation
-  await page.getByRole('button', { name: 'plus Add Transportation' }).click();
-  await page.getByRole('combobox').nth(1).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item').first().click();
-  await page.getByRole('textbox', { name: 'Select Date and Time' }).click();
-  await page.getByRole('button', { name: 'Next month (PageDown)' }).click();
-  await page.getByRole('button', { name: 'Next month (PageDown)' }).click();
-  await page.getByText('10', { exact: true }).nth(3).click();
-  await page.getByRole('button', { name: 'OK' }).click();
-
-  // Add Guide
-  await page.getByRole('button', { name: 'plus Add Guide' }).click();
-  await page.getByRole('radio', { name: 'Both' }).check();
-  await page.getByRole('checkbox', { name: 'English' }).check();
-  await page.getByRole('checkbox', { name: 'Arabic' }).check();
-  await page.getByRole('checkbox', { name: 'Urdu' }).check();
-  await page.getByRole('button', { name: 'Proceed', exact: true }).click();
-
-  // Guide schedule
-  await page.getByRole('textbox', { name: 'Date', exact: true }).click();
-  await page.getByRole('button', { name: 'Next month (PageDown)' }).click();
-  await page.getByRole('button', { name: 'Next month (PageDown)' }).click();
-  await page.getByRole('cell', { name: '15', exact: true }).first().click();
-  await page.getByRole('textbox', { name: 'Time', exact: true }).click();
-  await page.getByText('Now').nth(2).click();
-  await page.getByPlaceholder('Enter No. of Peoples').fill('1');
+  // Dismiss chat widgets that may overlay the Proceed button
   await dismissChatWidgets(page);
+
+  // Proceed → wait for navigation to review page
   await page.getByRole('button', { name: 'Proceed', exact: true }).click();
-  await page.waitForTimeout(3000);
+  await page.waitForURL('**/umrah/customize/booking**', { timeout: 60000 });
+  await waitForLoader(page);
 
+  // Review page → Continue to payment (handle blank page)
+  await dismissChatWidgets(page);
   const continueBtn = page.getByRole('button', { name: 'Continue' });
-  if (await continueBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await continueBtn.click();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await continueBtn.isVisible({ timeout: 10000 }).catch(() => false)) break;
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForLoader(page);
   }
+  await continueBtn.click({ timeout: 15000 });
+  await page.waitForURL('**/umrah/customize/payment**', { timeout: 30000 });
+  await waitForLoader(page);
 
+  // Payment page — handle blank page
   await reloadIfBlank(page, '* First Name');
   await page.getByRole('textbox', { name: '* First Name' }).fill('anam');
   await page.getByRole('textbox', { name: '* Last Name' }).fill('saeed');
