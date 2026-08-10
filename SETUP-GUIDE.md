@@ -47,6 +47,16 @@ This downloads Chromium, Firefox, and WebKit browsers.
 npx playwright test
 ```
 
+### UAT (uat.dyfana.com)
+```powershell
+# PowerShell (VS Code terminal)
+$env:TEST_ENV="uat"; npx playwright test
+```
+```bash
+# Git Bash / CMD
+set TEST_ENV=uat && npx playwright test
+```
+
 ### Live / Production (www.dyfana.com)
 ```powershell
 # PowerShell (VS Code terminal)
@@ -106,8 +116,10 @@ git pull origin master
 | Install dependencies          | `npm install`                                        |
 | Install browsers              | `npx playwright install`                             |
 | Run all tests (Staging)       | `npx playwright test`                                |
+| Run all tests (UAT)           | `$env:TEST_ENV="uat"; npx playwright test`           |
 | Run all tests (Live)          | `$env:TEST_ENV="live"; npx playwright test`          |
 | Run specific test             | `npx playwright test --grep "test name"`             |
+| Run specific test (UAT)       | `$env:TEST_ENV="uat"; npx playwright test --grep "test name"` |
 | Run specific test (Live)      | `$env:TEST_ENV="live"; npx playwright test --grep "test name"` |
 | Run with browser visible      | `npx playwright test --headed`                       |
 | Open Playwright UI            | `npx playwright test --ui`                           |
@@ -133,4 +145,5 @@ git pull origin master
 | Environment | URL                        | Command                                     |
 |-------------|----------------------------|---------------------------------------------|
 | Staging     | https://dev.dyfana.com     | `npx playwright test`                       |
+| UAT         | https://uat.dyfana.com     | `$env:TEST_ENV="uat"; npx playwright test`  |
 | Live        | https://www.dyfana.com     | `$env:TEST_ENV="live"; npx playwright test` |

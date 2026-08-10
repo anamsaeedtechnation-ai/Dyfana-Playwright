@@ -1,9 +1,14 @@
 import { test, expect, Page } from '@playwright/test';
 
-const IS_LIVE = process.env.TEST_ENV === 'live';
+const TEST_ENV = process.env.TEST_ENV || 'staging';
+const IS_LIVE = TEST_ENV === 'live';
+const IS_UAT = TEST_ENV === 'uat';
 const BASE_URL = IS_LIVE
   ? 'https://www.dyfana.com'
-  : 'https://dev.dyfana.com';
+  : IS_UAT
+    ? 'https://uat.dyfana.com'
+    : 'https://dev.dyfana.com';
+const WAIT = IS_UAT ? 5000 : 2000;
 
 test.describe.configure({ retries: 1 });
 
@@ -41,17 +46,23 @@ const clickPayNow = async (page: Page) => {
 const reloadIfBlank = async (page: Page, marker: string) => {
   const field = page.getByRole('textbox', { name: marker });
   for (let attempt = 0; attempt < 3; attempt++) {
-    if (await field.isVisible({ timeout: 10000 }).catch(() => false)) return;
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
+    if (await field.isVisible({ timeout: IS_UAT ? 20000 : 10000 }).catch(() => false)) return;
+    await page.reload({ waitUntil: IS_UAT ? 'commit' : 'domcontentloaded' });
+    await page.waitForTimeout(WAIT);
   }
 };
 
 const waitForLoader = async (page: Page) => {
-  await page.waitForTimeout(2000);
-  await page.evaluate(() => {
-    document.querySelectorAll('.loader').forEach((el) => el.remove());
-  });
+  await page.waitForTimeout(WAIT);
+  for (let i = 0; i < (IS_UAT ? 5 : 1); i++) {
+    await page.evaluate(() => {
+      document.querySelectorAll('.loader').forEach((el) => el.remove());
+      document.querySelectorAll('[class*="loader"]').forEach((el) => {
+        if (getComputedStyle(el).position === 'fixed') el.remove();
+      });
+    });
+    if (IS_UAT) await page.waitForTimeout(2000);
+  }
 };
 
 const verifyPaymentForm = async (page: Page) => {
@@ -59,16 +70,31 @@ const verifyPaymentForm = async (page: Page) => {
     .getByRole('textbox', { name: 'Credit or debit card number' })).toBeVisible({ timeout: 15000 });
 };
 
+const gotoPage = async (page: Page, url: string) => {
+  await page.goto(url, { waitUntil: IS_UAT ? 'commit' : 'domcontentloaded' });
+  if (IS_UAT) {
+    await page.waitForTimeout(15000);
+    await waitForLoader(page);
+  }
+};
+
 test.beforeEach(async ({ page }) => {
   await blockChatWidgets(page);
-  await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' });
-  await waitForLoader(page);
+  if (!IS_UAT) {
+    await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' });
+    await waitForLoader(page);
+  }
 });
 
 test('Umrah booking', async ({ page }) => {
-  await page.getByRole('link', { name: 'Umrah Umrah' }).click();
-  await waitForLoader(page);
-  await page.getByRole('link', { name: 'Join' }).first().click();
+  if (IS_UAT) {
+    await gotoPage(page, `${BASE_URL}/umrah`);
+  } else {
+    await page.getByRole('link', { name: 'Umrah Umrah' }).click();
+    await waitForLoader(page);
+  }
+  await dismissChatWidgets(page);
+  await page.getByRole('link', { name: 'Join' }).first().click({ timeout: 60000 });
   await page.getByRole('button', { name: 'View Details' }).first().click();
 
   await page.locator('input[name="name"]').fill('anam');
@@ -87,6 +113,9 @@ test('Umrah booking', async ({ page }) => {
 
   if (IS_LIVE) {
     await verifyPaymentForm(page);
+  } else if (IS_UAT) {
+    await clickPayNow(page);
+    await expect(page.getByText(/declined|failed|error|unsuccessful|invalid|not successful|known test card|live mode/i).first()).toBeVisible({ timeout: 30000 });
   } else {
     await clickPayNow(page);
     await expect(page.getByText(/Successfully book umrah/i).first()).toBeVisible({ timeout: 30000 });
@@ -94,8 +123,12 @@ test('Umrah booking', async ({ page }) => {
 });
 
 test('Transport booking', async ({ page }) => {
-  await page.getByRole('link', { name: 'Transport Transport' }).click();
-  await waitForLoader(page);
+  if (IS_UAT) {
+    await gotoPage(page, `${BASE_URL}/transport`);
+  } else {
+    await page.getByRole('link', { name: 'Transport Transport' }).click();
+    await waitForLoader(page);
+  }
 
   await page.getByRole('combobox').first().click();
   await page.getByText('Makkah Hotel to Makkah Ziyarat').first().click();
@@ -120,6 +153,9 @@ test('Transport booking', async ({ page }) => {
 
   if (IS_LIVE) {
     await verifyPaymentForm(page);
+  } else if (IS_UAT) {
+    await clickPayNow(page);
+    await expect(page.getByText(/declined|failed|error|unsuccessful|invalid|not successful|known test card|live mode/i).first()).toBeVisible({ timeout: 30000 });
   } else {
     await clickPayNow(page);
     await expect(page.getByText(/Successfully book transport/i).first()).toBeVisible({ timeout: 30000 });
@@ -127,8 +163,12 @@ test('Transport booking', async ({ page }) => {
 });
 
 test('Guide booking', async ({ page }) => {
-  await page.getByRole('link', { name: 'Guide Guides' }).click();
-  await waitForLoader(page);
+  if (IS_UAT) {
+    await gotoPage(page, `${BASE_URL}/guide`);
+  } else {
+    await page.getByRole('link', { name: 'Guide Guides' }).click();
+    await waitForLoader(page);
+  }
   await page.getByRole('button', { name: 'Book Now' }).first().click();
 
   await page.locator('.ant-picker-input').first().click();
@@ -137,19 +177,27 @@ test('Guide booking', async ({ page }) => {
   const month = String(new Date().getMonth() + 1).padStart(2, '0');
   await page.getByTitle(`${nextYear}-${month}-25`).click();
 
-  await page.getByRole('textbox', { name: '* Select Available Time' }).click();
-  await page.waitForTimeout(500);
-  await page.getByText('03').nth(2).click();
-  await page.waitForTimeout(500);
+  const timeField = page.getByRole('textbox', { name: '* Select Available Time' });
+  await timeField.click();
+  await page.waitForTimeout(IS_UAT ? 2000 : 500);
+  const timeOption = page.locator('.ant-picker-time-panel-cell-inner').filter({ hasText: /^03$/ }).first();
+  if (await timeOption.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await timeOption.click();
+  } else {
+    await page.getByText('03').nth(2).click();
+  }
+  await page.waitForTimeout(IS_UAT ? 1000 : 500);
   const okBtn = page.getByRole('button', { name: 'OK', exact: true });
   await okBtn.click({ timeout: 15000, force: true });
+  await page.waitForTimeout(IS_UAT ? 2000 : 500);
 
   await page.getByRole('spinbutton', { name: '* Number of People' }).fill('2');
   await page.locator('.ant-form-item-control-input-content > .ant-row > .ant-col > .ant-space > .ant-space-item > .ant-btn').click();
 
-  const navigated = await page.waitForURL('**/checkout**', { timeout: 30000 }).then(() => true).catch(() => false);
-  if (!navigated && IS_LIVE) {
-    return;
+  await page.waitForURL('**/checkout**', { timeout: IS_UAT ? 60000 : 30000, waitUntil: IS_UAT ? 'commit' : 'domcontentloaded' });
+  if (IS_UAT) {
+    await page.waitForTimeout(20000);
+    await waitForLoader(page);
   }
 
   await reloadIfBlank(page, '* First Name');
@@ -163,6 +211,9 @@ test('Guide booking', async ({ page }) => {
 
   if (IS_LIVE) {
     await verifyPaymentForm(page);
+  } else if (IS_UAT) {
+    await clickPayNow(page);
+    await expect(page.getByText(/declined|failed|error|unsuccessful|invalid|not successful|known test card|live mode/i).first()).toBeVisible({ timeout: 30000 });
   } else {
     await clickPayNow(page);
     await expect(page.getByText(/Successfully book|Booking successful/i).first()).toBeVisible({ timeout: 30000 });
@@ -170,8 +221,12 @@ test('Guide booking', async ({ page }) => {
 });
 
 test('Explore Saudi booking', async ({ page }) => {
-  await page.getByRole('link', { name: 'Explore Saudi Explore' }).click();
-  await waitForLoader(page);
+  if (IS_UAT) {
+    await gotoPage(page, `${BASE_URL}/explore-saudi`);
+  } else {
+    await page.getByRole('link', { name: 'Explore Saudi Explore' }).click();
+    await waitForLoader(page);
+  }
   await page.getByRole('button', { name: 'Book Now' }).first().click();
 
   await page.getByRole('textbox', { name: 'Full Name *' }).fill('anam');
@@ -190,6 +245,9 @@ test('Explore Saudi booking', async ({ page }) => {
 
   if (IS_LIVE) {
     await verifyPaymentForm(page);
+  } else if (IS_UAT) {
+    await clickPayNow(page);
+    await expect(page.getByText(/declined|failed|error|unsuccessful|invalid|not successful|known test card|live mode/i).first()).toBeVisible({ timeout: 30000 });
   } else {
     await clickPayNow(page);
     await expect(page.getByText(/Successfully book|Booking successful/i).first()).toBeVisible({ timeout: 30000 });
@@ -201,12 +259,12 @@ test('Hotel booking', async ({ page }) => {
   const checkIn = fmt(new Date(Date.now() + 86400000 * 2));
   const checkOut = fmt(new Date(Date.now() + 86400000 * 3));
   const filterUrl = `${BASE_URL}/filter?checkInOut=${checkIn}_${checkOut}&travelers=2&city=Makkah&adults=2&rooms=1&lat=21.3891&lng=39.8579&place=Makkah%20Saudi%20Arabia&placeId=ChIJjRUoRRyZwxURcFyTsR6oPZQ&name=Makkah&breadcrumb=Makkah%2C%20Saudi%20Arabia`;
-  await page.goto(filterUrl, { waitUntil: 'domcontentloaded' });
+  await gotoPage(page, filterUrl);
 
   const viewDetailsBtn = page.getByRole('button', { name: 'View Details' }).first();
   for (let attempt = 0; attempt < 3; attempt++) {
     if (await viewDetailsBtn.isVisible({ timeout: 30000 }).catch(() => false)) break;
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.reload({ waitUntil: IS_UAT ? 'commit' : 'domcontentloaded' });
   }
   await viewDetailsBtn.click({ timeout: 60000 });
 
@@ -233,6 +291,9 @@ test('Hotel booking', async ({ page }) => {
 
   if (IS_LIVE) {
     await verifyPaymentForm(page);
+  } else if (IS_UAT) {
+    await clickPayNow(page);
+    await expect(page.getByText(/declined|failed|error|unsuccessful|invalid|not successful|known test card|live mode/i).first()).toBeVisible({ timeout: 30000 });
   } else {
     await clickPayNow(page);
     await expect(page.getByText(/Successfully book|Booking successful/i).first()).toBeVisible({ timeout: 30000 });
@@ -243,7 +304,7 @@ test('Offers booking', async ({ page }) => {
   const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const checkIn = fmt(new Date(Date.now() + 86400000 * 2));
   const checkOut = fmt(new Date(Date.now() + 86400000 * 3));
-  await page.goto(`${BASE_URL}/hotel/186?checkInOut=${checkIn}_${checkOut}&adults=2&children=0&rooms=1`, { waitUntil: 'domcontentloaded' });
+  await gotoPage(page, `${BASE_URL}/hotel/186?checkInOut=${checkIn}_${checkOut}&adults=2&children=0&rooms=1`);
 
   const alert = page.locator('.ant-alert');
   if (await alert.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -273,6 +334,9 @@ test('Offers booking', async ({ page }) => {
 
   if (IS_LIVE) {
     await verifyPaymentForm(page);
+  } else if (IS_UAT) {
+    await clickPayNow(page);
+    await expect(page.getByText(/declined|failed|error|unsuccessful|invalid|not successful|known test card|live mode/i).first()).toBeVisible({ timeout: 30000 });
   } else {
     await clickPayNow(page);
     await expect(page.getByText(/Successfully book|Booking successful/i).first()).toBeVisible({ timeout: 30000 });
@@ -280,7 +344,7 @@ test('Offers booking', async ({ page }) => {
 });
 
 test('Custom Umrah booking', async ({ page }) => {
-  await page.goto(`${BASE_URL}/umrah/customize/`, { waitUntil: 'domcontentloaded' });
+  await gotoPage(page, `${BASE_URL}/umrah/customize/`);
   await waitForLoader(page);
   await page.waitForTimeout(1000);
 
@@ -301,18 +365,18 @@ test('Custom Umrah booking', async ({ page }) => {
 
   await dismissChatWidgets(page);
   await page.getByRole('button', { name: 'Proceed', exact: true }).click();
-  await page.waitForURL('**/umrah/customize/booking**', { timeout: 60000 });
+  await page.waitForURL('**/umrah/customize/booking**', { timeout: 60000, waitUntil: IS_UAT ? 'commit' : 'domcontentloaded' });
   await waitForLoader(page);
 
   await dismissChatWidgets(page);
   const continueBtn = page.getByRole('button', { name: 'Continue' });
   for (let attempt = 0; attempt < 3; attempt++) {
     if (await continueBtn.isVisible({ timeout: 10000 }).catch(() => false)) break;
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.reload({ waitUntil: IS_UAT ? 'commit' : 'domcontentloaded' });
     await waitForLoader(page);
   }
   await continueBtn.click({ timeout: 15000 });
-  await page.waitForURL('**/umrah/customize/payment**', { timeout: 30000 });
+  await page.waitForURL('**/umrah/customize/payment**', { timeout: 30000, waitUntil: IS_UAT ? 'commit' : 'domcontentloaded' });
   await waitForLoader(page);
 
   await reloadIfBlank(page, '* First Name');
@@ -326,6 +390,9 @@ test('Custom Umrah booking', async ({ page }) => {
 
   if (IS_LIVE) {
     await verifyPaymentForm(page);
+  } else if (IS_UAT) {
+    await clickPayNow(page);
+    await expect(page.getByText(/declined|failed|error|unsuccessful|invalid|not successful|known test card|live mode/i).first()).toBeVisible({ timeout: 30000 });
   } else {
     await clickPayNow(page);
     await expect(page.getByText(/Successfully book|Booking successful/i).first()).toBeVisible({ timeout: 30000 });
@@ -333,11 +400,11 @@ test('Custom Umrah booking', async ({ page }) => {
 });
 
 test('Umrah Badal booking', async ({ page }) => {
-  await page.goto(`${BASE_URL}/umrah-badal/57`, { waitUntil: 'domcontentloaded' });
+  await gotoPage(page, `${BASE_URL}/umrah-badal/57`);
   await waitForLoader(page);
   const nameField = page.getByRole('textbox', { name: 'Umrah Being Performed on the' });
   if (!(await nameField.isVisible({ timeout: 10000 }).catch(() => false))) {
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.reload({ waitUntil: IS_UAT ? 'commit' : 'domcontentloaded' });
     await waitForLoader(page);
   }
   await nameField.fill('test');
@@ -354,6 +421,9 @@ test('Umrah Badal booking', async ({ page }) => {
 
   if (IS_LIVE) {
     await verifyPaymentForm(page);
+  } else if (IS_UAT) {
+    await clickPayNow(page);
+    await expect(page.getByText(/declined|failed|error|unsuccessful|invalid|not successful|known test card|live mode/i).first()).toBeVisible({ timeout: 30000 });
   } else {
     await clickPayNow(page);
     await expect(page.getByText(/Successfully book|Booking successful/i).first()).toBeVisible({ timeout: 30000 });
