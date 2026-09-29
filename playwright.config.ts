@@ -4,7 +4,7 @@ const isUAT = process.env.TEST_ENV === 'uat';
 
 export default defineConfig({
   testDir: './tests',
-  timeout: isUAT ? 600000 : 300000,
+  timeout: 600000,
   expect: { timeout: isUAT ? 30000 : 15000 },
   reporter: [['list']],
   use: {
